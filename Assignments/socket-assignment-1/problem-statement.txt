@@ -1,0 +1,1 @@
+S accepts sfd1, sfd2(connection less) , sfd3, clients number 3 , 4, 5 then after that it handovers the accepted clients to S2 server.
