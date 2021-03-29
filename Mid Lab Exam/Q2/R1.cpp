@@ -1,0 +1,173 @@
+#include<iostream>
+#include<stdio.h>
+#include<stdlib.h>
+#include<sys/types.h>
+#include<unistd.h>
+#include<pthread.h>
+#include<semaphore.h>
+#include<fcntl.h>
+#include<string.h>
+#include<ctype.h>
+#include<signal.h>
+#include<poll.h>
+
+#include<sys/wait.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<sys/shm.h>
+#include<sys/msg.h>
+#include<sys/uio.h>
+#include<sys/socket.h>
+#include<sys/errno.h>
+#include<sys/un.h>
+
+#include<netinet/if_ether.h>
+#include<net/ethernet.h>
+#include<netinet/ether.h>
+#include<netinet/udp.h>
+#include<netinet/in.h>
+#include<arpa/inet.h>
+#include<netinet/ip.h>
+
+#define PORT 9090
+#define BUFF_LEN 1024
+#define MAXCLIENTS 2
+#define UNIXSTR_PATH "/tmp/fd-pass.socket1"
+
+using namespace std;
+
+
+ssize_t read_fd(int nusfd, int &fd)
+{
+    struct msghdr msg;
+    char dup[256];
+    struct iovec iov = {
+        .iov_base = &dup,
+        .iov_len = sizeof(dup)
+    };
+
+    struct cmsghdr *cmptr;
+    char control[CMSG_SPACE(sizeof(int))];
+    
+    msg.msg_control = control;
+    msg.msg_controllen = sizeof(control);
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+
+    ssize_t n;
+    if((n = recvmsg(nusfd, &msg, 0)) < 0)
+    {
+        perror("recvmsg FAILED");
+        exit(1);
+    }
+
+    if(!n)
+        return n;
+    
+    if((cmptr = CMSG_FIRSTHDR(&msg)) != NULL && cmptr->cmsg_len == CMSG_LEN(sizeof(int)))
+    {
+        if(cmptr->cmsg_level != SOL_SOCKET)
+        {
+            perror("control level != SOL_SOCKET");
+            exit(1);
+        }
+        if(cmptr->cmsg_type != SCM_RIGHTS)
+        {
+            perror("control type != SCM_RIGHTS");
+            exit(1);
+        }
+        fd = (int)(*CMSG_DATA(cmptr));
+    }
+    else
+    {
+        fd = -1;
+    }
+    return n;
+}
+
+int main()
+{
+    int usfd;
+    if((usfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+    {
+        perror("socket FAILED");
+        exit(1);
+    }
+    
+    unlink(UNIXSTR_PATH);
+
+    struct sockaddr_un serv_addr, cli_addr;
+    serv_addr.sun_family = AF_UNIX;
+    strcpy(serv_addr.sun_path, UNIXSTR_PATH);
+
+    if(bind(usfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
+    {
+        perror("bind FAILED");
+        exit(1);
+    }
+
+    if(listen(usfd, MAXCLIENTS) < 0)
+    {
+        perror("listen FAILED");
+        exit(1);
+    }
+
+    int nusfd;
+    int clilen = sizeof(cli_addr);
+
+    if((nusfd = accept(usfd, (struct sockaddr*) &cli_addr, (socklen_t *) &clilen)) < 0)
+    {
+        perror("accept FAILED");
+        exit(1);
+    }
+    else
+    {
+        cout << "Connection established!\n";
+    }
+
+
+    while(1)
+    {
+        int fd;
+        read_fd(nusfd, fd);
+
+        int score = rand() % 101;
+
+        char msg[] = "Enter name: ";
+        send(fd, msg, sizeof(msg), 0);
+        char name[BUFF_LEN];
+        memset(name, 0, BUFF_LEN);
+        read(fd, name, BUFF_LEN);
+
+        int sfd;
+
+        if((sfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        {
+            perror("socket FAILED");
+            exit(1);
+        }
+
+        struct sockaddr_in server_addr;
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_addr.s_addr = INADDR_ANY;
+        server_addr.sin_port = htons(PORT);
+
+        if(connect(sfd, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
+        {
+            perror("connect FAILED");
+            exit(1);
+        }
+
+        string s_score = to_string(score);
+        char* score_to_send = (char*)s_score.c_str();
+
+        send(sfd, name, BUFF_LEN, 0);
+        send(sfd, (char*) score_to_send, strlen(score_to_send), 0);
+        
+    }
+
+
+    return 0;
+}
